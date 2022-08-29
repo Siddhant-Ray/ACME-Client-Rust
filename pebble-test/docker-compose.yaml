@@ -1,0 +1,18 @@
+version: '3'
+
+services:
+ pebble:
+  image: letsencrypt/pebble
+  command: pebble -config /test/my-pebble-config.json
+  network_mode: "host"
+  dns:
+    - "127.0.0.1:10053"
+  ports:
+    - 14000:14000  # ACME port
+    - 15000:15000  # Management port
+  environment:
+    - PEBBLE_VA_NOSLEEP=1
+  volumes:
+    - ./my-pebble-config.json:/test/my-pebble-config.json
+    - ./localhost/cert.pem:/test/cert.pem
+    - ./localhost/key.pem:/test/key.pem
