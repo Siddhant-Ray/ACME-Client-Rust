@@ -14,7 +14,7 @@ use serde_json::json;
 
 use crate::{
     error::{Error, Result},
-    types::{Certificate, Nonce},
+    acc::{Certificate, Nonce},
     KEY_WIDTH,
 };
 
@@ -34,7 +34,7 @@ pub(crate) fn generate_rsa_key() -> Result<Rsa<Private>> {
 }
 
 // Generate a key pair.
-pub(crate) fn generate_key_pair() -> Result<PKey<Private>> {
+pub fn generate_rsa_keypair() -> Result<(Rsa<Private>, Rsa<Public>)> {
     let rsa_key = generate_rsa_key()?;
     Ok((
         Rsa::private_key_from_pem(&rsa_key.private_key_to_pem()?)?,
@@ -130,7 +130,7 @@ where
         .to_str()?
         .to_owned();
 
-    Ok((location, replay_nonce, response.json()?))
+    Ok((replay_nonce, response.json()?, location))
 }
 
 // Load a certificate from a pem file.
@@ -161,7 +161,7 @@ pub fn save_certificates(certificate_chain: Certificate) -> Result<()> {
 }
 
 // Save rsa keypair to private and public key files.
-pub fn save_key_pair(key_pair: &PKey<Private>) -> Result<()> {
+pub fn save_keypair(keypair: &(Rsa<Private>, Rsa<Public>)) -> Result<()> {
     let private_key = keypair.0.private_key_to_pem()?;
     let public_key = keypair.1.public_key_to_pem()?;
 
