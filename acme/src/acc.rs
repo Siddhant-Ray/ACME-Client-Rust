@@ -161,6 +161,20 @@ impl Account {
     }
 }
 
+// Holds information about an order.
+#[derive(Serialize, Deserialize)]
+pub struct Order {
+    pub status: String,
+    pub expires: String,
+    pub identifiers: serde_json::Value,
+    pub authorizations: Vec<String>,
+    pub finalize: String,
+    #[serde(skip)]
+    pub nonce: Nonce,
+    #[serde(skip)]
+    optional_csr: Option<X509Req>,
+}
+
 impl Order {
     // Fetches the available authorisation options from the server for a certain order.
     pub fn fetch_auth_challenges(
@@ -263,4 +277,196 @@ impl Order {
     }
 }
 
-// TODO: Add an implementation for ChallengeAuthorisation and UpdatedOrder.
+impl Debug for Order {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Order")
+            .field("status", &self.status)
+            .field("expires", &self.expires)
+            .field("identifiers", &self.identifiers)
+            .field("authorizations", &self.authorizations)
+            .field("finalize", &self.finalize)
+            .field("nonce", &self.nonce)
+            .field(
+                "optional_csr",
+                if self.optional_csr.is_some() {
+                    &"Some(Csr)"
+                } else {
+                    &"None"
+                },
+            )
+            .finish()
+    }
+}
+
+// Holds information about a Challenge.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Challenge {
+    pub status: StatusType,
+    pub token: String,
+    #[serde(rename = "type")]
+    pub challenge_type: String,
+    pub url: String,
+}
+
+// Holds information about the authentification options.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ChallengeAuthorisation {
+    // type, value
+    pub identifier: serde_json::Value,
+    pub status: StatusType,
+    pub expires: String,
+    pub challenges: Vec<Challenge>,
+    pub wildcard: Option<bool>,
+    #[serde(skip)]
+    pub nonce: Nonce,
+}
+
+impl ChallengeAuthorisation {
+    // Fetches the available authorisation options from the server for a certain order.
+    pub fn solve_http_challenge(
+        self,
+        client: &Client,
+        account_url: &str,
+        p_key: &Rsa<Private>,
+        standalone: bool,
+    ) -> Result<Nonce> {
+        let http_challenge = self
+            .challenges
+            .into_iter()
+            .find(|challenge| challenge.challenge_type == "http-01")
+            .ok_or(Error::NoHttpChallengePresent)?;
+
+        ChallengeAuthorisation::complete_challenge(
+            client,
+            http_challenge,
+            self.nonce,
+            account_url,
+            p_key,
+            standalone,
+        )
+    }
+
+    // Completes a challenge.
+    fn complete_challenge(
+        client: &Client,
+        challenge_infos: Challenge,
+        nonce: Nonce,
+        acc_url: &str,
+        private_key: &Rsa<Private>,
+        standalone: bool,
+    ) -> Result<Nonce> {
+        const CHALLENGE_PATH: &str = "/.well-known/acme-challenge";
+
+        let thumbprint = jwk(private_key)?;
+        let mut hasher = Sha256::new();
+        hasher.update(&thumbprint.to_string().into_bytes());
+        let thumbprint = hasher.finish();
+
+        let challenge_content = format!("{}.{}", challenge_infos.token, b64(&thumbprint));
+
+        let result = ChallengeAuthorisation::kick_off_http_challenge(
+            client,
+            challenge_infos.clone(),
+            nonce,
+            acc_url,
+            private_key,
+        )?;
+
+        if standalone {
+            std::thread::spawn(|| {
+                rouille::start_server("0.0.0.0:80", move |request| {
+                    if request.raw_url() == format!("{}/{}", CHALLENGE_PATH, challenge_infos.token)
+                    {
+                        rouille::Response::text(challenge_content.clone())
+                    } else {
+                        rouille::Response::empty_404()
+                    }
+                });
+            });
+        } else if check_for_existing_server() {
+            const WEB_ROOT: &str = "/var/www/html";
+
+            let full_path = Path::new(WEB_ROOT).join(CHALLENGE_PATH);
+            fs::create_dir_all(full_path.clone())?;
+            let mut output = File::create(full_path.join(challenge_infos.token))?;
+            write!(output, "{}", challenge_content)?;
+        } else {
+            return Err(Error::NoWebServer);
+        }
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        Ok(result)
+    }
+
+    // Requests the check of the server at the `ACME` server instance.
+    fn kick_off_http_challenge(
+        client: &Client,
+        challenge_infos: Challenge,
+        nonce: Nonce,
+        acc_url: &str,
+        private_key: &Rsa<Private>,
+    ) -> Result<Nonce> {
+        let header = json!({
+            "alg": "RS256",
+            "kid": acc_url,
+            "nonce": nonce,
+            "url": challenge_infos.url
+        });
+
+        let payload = json!({});
+
+        let jws = jws(payload, header, private_key)?;
+
+        Ok(client
+            .post(&challenge_infos.url)
+            .header("Content-Type", "application/jose+json")
+            .body(serde_json::to_string_pretty(&jws)?)
+            .send()?
+            .headers()
+            .get("replay-nonce")
+            .ok_or(Error::IncorrectResponse)?
+            .to_str()?
+            .to_owned())
+    }
+}
+
+// Holds information about the updated order.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdatedOrder {
+    pub status: String,
+    expires: String,
+    identifiers: serde_json::Value,
+    authorizations: serde_json::Value,
+    finalize: String,
+    pub certificate: String,
+    #[serde(skip)]
+    pub nonce: Nonce,
+}
+
+impl UpdatedOrder {
+    /// Downloads an issued certificate.
+    pub fn download_certificate(
+        &self,
+        client: &Client,
+        account_url: &str,
+        p_key: &Rsa<Private>,
+    ) -> Result<Certificate> {
+        let header = json!({
+            "alg": "RS256",
+            "url": self.certificate,
+            "kid": account_url,
+            "nonce": self.nonce,
+        });
+        let payload = json!("");
+
+        let jws = jws(payload, header, p_key)?;
+
+        Ok(client
+            .post(&self.certificate)
+            .header("Content-Type", "application/jose+json")
+            .body(serde_json::to_string_pretty(&jws)?)
+            .send()?
+            .text()?)
+    }
+}
+
+
