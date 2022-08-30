@@ -28,7 +28,7 @@ pub fn check_for_existing_server() -> bool {
     TcpStream::connect(&addrs[..]).is_ok()
 }
 
-// Generates a `RSA` private key.
+// Generates a RSA private key.
 pub(crate) fn generate_rsa_key() -> Result<Rsa<Private>> {
     Ok(Rsa::generate(KEY_WIDTH)?)
 }
