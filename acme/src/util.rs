@@ -42,16 +42,14 @@ pub fn generate_rsa_keypair() -> Result<(Rsa<Private>, Rsa<Public>)> {
     ))
 }
 
-// Create a jwk from a private key.
-pub(crate) fn jwk(key: &PKey<Private>) -> Result<serde_json::Value> {
-    let rsa_key = key.rsa()?;
-    let n = encode_config(&rsa_key.n().to_vec(), base64::URL_SAFE_NO_PAD);
-    let e = encode_config(&rsa_key.e().to_vec(), base64::URL_SAFE_NO_PAD);
+pub fn jwk(private_key: &Rsa<Private>) -> Result<serde_json::Value> {
+    let e = b64(&private_key.e().to_vec());
+    let n = b64(&private_key.n().to_vec());
 
     Ok(json!({
-        "kty": "RSA",
-        "n": n,
         "e": e,
+        "n": n,
+        "kty": "RSA",
     }))
 }
 
@@ -88,8 +86,8 @@ pub fn jws(
 }
 
 // Create b64 encoding.
-pub fn b64(bytes: &[u8]) -> String {
-    encode_config(bytes, base64::URL_SAFE_NO_PAD)
+pub(crate) fn b64(to_encode: &[u8]) -> String {
+    encode_config(to_encode, base64::URL_SAFE_NO_PAD)
 }
 
 // Extract the payload and nonce from a response.
@@ -112,7 +110,7 @@ where
 #[inline]
 pub(crate) fn extract_payload_location_and_nonce<T>(
     response: Response,
-) -> Result<(Nonce, T, String)>
+) -> Result<(String, Nonce, T)>
 where
     T: DeserializeOwned,
 {
@@ -130,7 +128,7 @@ where
         .to_str()?
         .to_owned();
 
-    Ok((replay_nonce, response.json()?, location))
+    Ok((location, replay_nonce, response.json()?))
 }
 
 // Load a certificate from a pem file.
