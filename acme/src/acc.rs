@@ -200,8 +200,7 @@ impl Order {
         Ok(challenge)
     }
 
-    /// Finalizes an order whose challenge was already done. This returns an `UpdatedOrder` object which
-    /// is able to download the issued certificate. This method `panics` if the challenge was not yet completed.
+    // Finalizes an order whose challenge was already done. 
     pub fn finalize_order(
         self,
         client: &Client,
