@@ -16,6 +16,10 @@ clap = { version = "3.0.10", features = ["derive"] }
 flexi_logger = "0.17.1"
 log = "0.4.14"
 thiserror = "1.0"
+trust-dns-server = "0.22.0"
+trust-dns-resolver = "*"
+trust-dns-client = "*"
+trust-dns-proto = "*"
 
 [lib]
 name = "acme"

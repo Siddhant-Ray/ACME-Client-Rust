@@ -16,6 +16,9 @@ mod acc;
 // Contains utility methods used in the acme context. 
 pub mod util;
 
+// Use the dns mod
+pub mod dns;
+
 const KEY_WIDTH: u32 = 2048;
 
 // Generate certificate for a given domain.
